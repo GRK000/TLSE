@@ -2,6 +2,7 @@ import threading
 from collections import Counter, deque
 from pathlib import Path
 from typing import Deque, Dict, List, Optional, Tuple
+import math
 
 import cv2
 import mediapipe as mp
@@ -16,7 +17,9 @@ from pynput import keyboard as kb
 # ==========================
 
 ROOT = Path(__file__).resolve().parents[2]
-MODEL_PATH = ROOT / "Pickles" / "modelNew.p"   # Igual que en tu versión anterior :contentReference[oaicite:0]{index=0}
+MODEL_PATH = ROOT / "Pickles" / "model_escalas.p"   # Igual que en tu versión anterior :contentReference[oaicite:0]{index=0}
+# MODEL_PATH = ROOT / "Pickles" / "model_normalized.p"
+
 
 CAMERA_INDEX = 0
 WINDOW_NAME = "Traductor LSE - Realtime"
@@ -46,20 +49,31 @@ LABELS_DICT: Dict[str, str] = {
 # ==========================
 
 def normalize_landmarks(landmarks):
-    xs = [lm.x for lm in landmarks]
-    ys = [lm.y for lm in landmarks]
+    # 1) Traslación (WRIST → origen)
+    wrist_x = landmarks[0].x
+    wrist_y = landmarks[0].y
+    pts = np.array([(lm.x - wrist_x, lm.y - wrist_y) for lm in landmarks], dtype=np.float32)
 
-    x_min = min(xs)
-    y_min = min(ys)
+    # 2) Rotación (alinear WRIST → MCP medio con eje X)
+    base_x, base_y = pts[9]   # MCP dedo medio
+    angle = math.atan2(base_y, base_x)
+    cos_a = math.cos(-angle)
+    sin_a = math.sin(-angle)
 
-    data_aux = []
-    for lm in landmarks:
-        data_aux.append(lm.x - x_min)
-        data_aux.append(lm.y - y_min)
+    R = np.array([[cos_a, -sin_a],
+                  [sin_a,  cos_a]], dtype=np.float32)
 
-    return np.array(data_aux, dtype=np.float32)
+    pts = pts @ R.T
 
+    # 3) Escala 
+    scale = np.sqrt(np.mean(pts[:,0]**2 + pts[:,1]**2))
+    if scale < 1e-6:
+        scale = 1e-6
 
+    pts /= scale
+
+    # 4) Flatten
+    return pts.flatten()
 
 
 # ==========================
@@ -200,16 +214,23 @@ class RealTimeSignRecognizer:
     # PREDICCIÓN Y SUAVIZADO
     # ==========================
 
-    def _predict(self, data_aux: np.ndarray) -> Tuple[str, float]:
-        """
-        Devuelve (label, confidence) del top-1.
-        """
-        data_aux = data_aux.reshape(1, -1)  
-        probs = self.model.predict_proba(data_aux)[0]  # shape (num_clases,)
+    def _predict(self, features: np.ndarray) -> Tuple[str, float]:
+        # Asegurar batch
+        if features.ndim == 1:
+            features = features.reshape(1, -1)
+
+        # Predecir probabilidades
+        probs = self.model.predict_proba(features)[0]
+
+        # Top-1
         idx = int(np.argmax(probs))
-        label = self.classes[idx]
-        confidence = float(probs[idx])
-        return str(label), confidence
+
+        # Seguridad: si por lo que sea hay mismatch de clases
+        if idx >= len(self.classes):
+            return "UNKNOWN", 0.0
+
+        return self.classes[idx], float(probs[idx])
+
 
     def _update_smoothing(self, label: str, confidence: float) -> None:
         """
