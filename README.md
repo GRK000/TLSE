@@ -1,53 +1,124 @@
-# TLSE – Sign-language translator research stack
+# TLSE - Static Sign/Gesture Alphabet Recognizer
 
-This project packages the end-to-end journey of a Spanish sign-language recognizer: controlled data capture, landmark preprocessing, classifier training, and a real-time interface that streams character-by-character translations to the screen (and optionally to a speaker). The repository is deliberately versioned so you can walk a recruiter through how each iteration improved accuracy, latency, and user feedback.
+TLSE is a computer-vision experiment for recognizing static hand signs and gesture-like alphabet poses from webcam frames. It is not a full Spanish Sign Language translator: it does not model grammar, sentence context, signer variation, or dynamic movement. The current scope is closer to a real-time sign/gesture alphabet recognizer with MediaPipe hand landmarks and a Random Forest classifier.
 
----
+## What Is In The Repo
 
-## Why this matters
+The maintained code lives in `src/tlse`:
 
-- **Human-centric accessibility proof of concept** – Transforms webcam input into character predictions while logging the confidence, supporting both visual and audible cues (via `pyttsx3`).
-- **Reproducible ML workflow** – Every script is tracked: from capturing datasets, through MediaPipe landmark extraction, to Random Forest training with hyperparameter tuning.
-- **Story-ready version history** – The `Versiones 1` folder documents the incremental engineering decisions that make a compelling interview narrative.
-
-## Repository layout at a glance
-
-| Area | What it holds |
+| Path | Purpose |
 | --- | --- |
-| `Recopilar Fotos/2DataSet.py` | Webcam tool for capturing letter samples (20 folders × 100 frames). |
-| `Procesamiento del Dataset/CrearDataSet.py` | MediaPipe Hands parsing + normalization that writes `data.pickle`. |
-| `Entrenar Modelo/EntrenamientoModelo5.py` | Latest training pipeline: 47-feature normalization, stratified split, RandomizedSearchCV, and `Pickles/model_depth47.p`. |
-| `Versiones 1/V1.4/PM_V1.4.9.py` | Current real-time recognizer that loads the pickle and overlays prediction + confidence. |
-| `Pickles/` | Stored models (`model_depth47.p`, legacy `model.p`, and future retrained versions). |
+| `src/tlse/capture.py` | Capture labeled webcam images into `data/raw/<class>/`. |
+| `src/tlse/preprocess.py` | Convert images into normalized 47-feature MediaPipe landmark vectors. |
+| `src/tlse/train.py` | Train a Random Forest and write model + metrics artifacts. |
+| `src/tlse/realtime.py` | Run webcam inference with landmark overlay, prediction, and confidence. |
+| `src/tlse/demo.py` | Create a deterministic synthetic dataset for smoke tests without webcam access. |
 
-The root also exposes experiments (`Entrenar Modelo/EntrenamientoModelo[2-4].py`), dataset archives, and notebooks in future releases.
+Historical scripts are still present in folders such as `Versiones 1/`, `Versiones 2/`, `Entrenar Modelo/`, `Procesamiento del Dataset/`, and `Recopilar Fotos/`. They are useful for portfolio history, but new work should target the package layout above.
 
-## Version highlights for storytelling
+## Environment
 
-- **V1.1 – Baseline recognition demo**: single-frame inference, bounding box overlay, and fps counter. Showcases initial feasibility with a static `model.p`.
-- **V1.2 – Voice + sentence builder**: adds `pyttsx3`, an “s” hotkey to append recognized characters to a running phrase, and smarter handling of `None` gestures for spacing.
-- **V1.3 – Edit controls & debouncing**: includes “b” for backspace, guards against duplicate predictions, and keeps the sentence output tidy for longer expressions.
-- **V1.4 – Feature-engineered classifier**: introduces `Data2`, 47-feature normalization (translation + rotation + scaling + depth), and training via `RandomizedSearchCV` over Random Forests. `PM_V1.4.9.py` demonstrates the final recognizer UI.
-- **V1.5 – Async controls & retraining paths**: runs keyboard listeners in parallel threads, records data for future finetuning, and saves `modelo_reentrenado.pkl` after live sessions.
+Python 3.9-3.11 is recommended because MediaPipe wheels may lag behind the newest Python releases.
 
-## Getting started (recruiter-friendly demo path)
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+pip install -e .
+```
 
-1. **Install dependencies** (Python 3.9+): `pip install opencv-python mediapipe numpy scikit-learn pyttsx3 tqdm pynput`.
-2. **Collect labeled samples**: run `python "Recopilar Fotos/2DataSet.py"` and follow the prompts (`q` to start each letter, `q` again to stop the capture session).
-3. **Generate landmark dataset**: `python "Procesamiento del Dataset/CrearDataSet.py"` to produce `data.pickle` from the captured folders.
-4. **Train the model**: `python "Entrenar Modelo/EntrenamientoModelo5.py"` builds the Random Forest, prints classification reports, and saves `Pickles/model_depth47.p`.
-5. **Launch the translator**: `python "Versiones 1/V1.4/PM_V1.4.9.py"` to open a live window that visualizes predictions and confidence on each frame. Press `q` or close the window to exit.
+Dependencies are also declared in `pyproject.toml`, so the environment is freezeable with:
 
-## Technical takeaways
+```bash
+pip freeze > requirements.lock.txt
+```
 
-- **Normalized geometries** – Most recent scripts translate the hand to the wrist origin, rotate to a stable base, scale uniformly, and append depth cues per fingertip.
-- **Structured experimentation** – Each version folder documents what was added; recruiters can step through the history to see how UI, controls, and model reliability improved.
-- **Production-ready model training** – `EntrenamientoModelo5.py` runs `RandomizedSearchCV` with sensible hyperparameter bounds and reports a confusion matrix, highlighting the candidate’s ability to benchmark ML models.
+## Reproducible Demo Without Webcam
 
-## Notes
+The demo dataset is synthetic 47-feature landmark data. It proves the package, CLI, training, model serialization, and metrics path work in a clean environment. It is not a sign-language benchmark.
 
-- Large pickles (`*.p`) and dataset folders are excluded by `.gitignore`.
-- The real-time script assumes the latest pickle lives at `Pickles/model_depth47.p`; regenerate it after any data change.
-- The capture + training loop is reproducible in any environment with a webcam and Python 3.9+; you can use it to demo rapid prototyping skills in interviews.
+```bash
+python scripts/make_demo_dataset.py --output demo/sample_data/landmarks_demo.pickle
+python -m tlse.train --dataset demo/sample_data/landmarks_demo.pickle --model-output models/demo_model.p --report-output reports/demo_metrics.json --n-iter 2 --cv 2 --n-jobs 1
+```
 
-Let me know if you want a shorter “elevator pitch” version of this README or a version in Spanish for collaborators.
+Expected smoke-test result on the generated demo dataset:
+
+| Dataset | Classes | Samples | Accuracy | Macro F1 |
+| --- | ---: | ---: | ---: | ---: |
+| `demo/sample_data/landmarks_demo.pickle` | 4 | 160 | 1.00 | 1.00 |
+
+The perfect score is expected because the synthetic classes are deliberately separable. Use the real image workflow below for meaningful model quality.
+
+## Real Dataset Workflow
+
+Use a consistent path convention for new runs:
+
+```bash
+python -m tlse.capture --output-dir data/raw --num-classes 20 --images-per-class 100
+python -m tlse.preprocess --data-dir data/raw --output data/processed/landmarks.pickle
+python -m tlse.train --dataset data/processed/landmarks.pickle --model-output models/model_depth47.p --report-output reports/metrics.json
+python -m tlse.realtime --model models/model_depth47.p
+```
+
+If you already have the legacy local dataset in `Data2/`, preprocess it into the new convention:
+
+```bash
+python -m tlse.preprocess --data-dir Data2 --output data/processed/data2_landmarks.pickle
+python scripts/evaluate_model.py --dataset data/processed/data2_landmarks.pickle --model Pickles/model_depth47.p --report-output reports/data2_eval_metrics.json
+```
+
+## Metrics
+
+`tlse.train` writes `reports/metrics.json` with:
+
+- accuracy and macro F1
+- class count and sample count
+- train/test split sizes
+- best Random Forest hyperparameters
+- full `classification_report`
+- confusion matrix
+
+Current local benchmark from the legacy processed dataset:
+
+| Dataset/model | Features | Classes | Samples | Accuracy | Macro F1 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `Pickles/data.pickle` + `Pickles/model.p` | 42 | 20 | 2000 | 0.993 | 0.993 |
+
+Main observed confusion: the `None` class has lower recall than the signed classes. In the local run, 12 of 100 `None` samples were predicted as another class, especially `K`, `E`, `L`, `C`, `P`, and `U`. Treat this as a legacy in-sample evaluation because the committed pickle does not include the original train/test split metadata.
+
+The newer `Data2/` + `Pickles/model_depth47.p` 47-feature model needs OpenCV and MediaPipe to regenerate comparable processed features. Generate `reports/data2_eval_metrics.json` with the command above before publishing a stronger portfolio claim.
+
+## Demo Visuals
+
+For the portfolio README, add a real capture or GIF under `docs/media/` showing:
+
+- webcam frame
+- MediaPipe hand landmarks
+- predicted class
+- confidence score
+
+Recommended final embed:
+
+```markdown
+![TLSE webcam demo](docs/media/tlse-demo.gif)
+```
+
+## Limitations
+
+- Recognizes isolated static poses; it does not translate full Spanish Sign Language.
+- Accuracy depends heavily on the signer, camera, lighting, distance, and class balance.
+- MediaPipe can fail with occlusion, motion blur, partial hands, or unusual hand orientations.
+- The `None` class is a practical UI state, not a linguistic sign.
+- Dynamic signs need temporal modeling and video sequences; the current Random Forest uses single-frame features.
+
+## Legacy Map
+
+| Legacy path | New target |
+| --- | --- |
+| `Recopilar Fotos/2DataSet.py` | `src/tlse/capture.py` |
+| `Procesamiento del Dataset/CrearDataSet.py` | `src/tlse/preprocess.py` |
+| `Entrenar Modelo/EntrenamientoModelo5.py` | `src/tlse/train.py` |
+| `Versiones 1/V1.4/PM_V1.4.9.py` | `src/tlse/realtime.py` |
+| `Data2/` | `data/raw/` |
+| `Pickles/model_depth47.p` | `models/model_depth47.p` |

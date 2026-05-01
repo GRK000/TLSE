@@ -8,11 +8,17 @@ Data/
 Data1/
 Data2/
 BORRAR/
+data/raw/
+data/processed/
+models/
+reports/
 
 # Pickled datasets & models (regenerate when needed)
 *.pickle
 model*.p
 modelo_reentrenado.pkl
+!demo/sample_data/
+!demo/sample_data/*.pickle
 
 # IDE settings
 .idea/
