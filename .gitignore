@@ -2,6 +2,10 @@ __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+.pytest_cache/
+.pytest-tmp/
+pytest-cache-files-*/
+.venv
 
 # Media and generated datasets
 Data/

@@ -2,8 +2,6 @@ import argparse
 import time
 from pathlib import Path
 
-import cv2
-
 
 def capture_dataset(
     output_dir: Path,
@@ -12,6 +10,8 @@ def capture_dataset(
     delay_seconds: float,
     camera_index: int,
 ) -> None:
+    import cv2
+
     output_dir.mkdir(parents=True, exist_ok=True)
     cap = cv2.VideoCapture(camera_index)
 

@@ -2,15 +2,19 @@ import argparse
 import pickle
 from pathlib import Path
 
-import cv2
-import mediapipe as mp
 import numpy as np
-from tqdm import tqdm
 
 from tlse.features import normalize_landmarks
 
 
 def build_landmark_dataset(data_dir: Path, min_detection_confidence: float) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    import cv2
+    import mediapipe as mp
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        tqdm = lambda iterable, **_: iterable
+
     mp_hands = mp.solutions.hands
     data: list[np.ndarray] = []
     labels: list[str] = []

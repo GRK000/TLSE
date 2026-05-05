@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 import pickle
@@ -21,16 +23,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset", type=Path, default=Path("data/processed/landmarks.pickle"))
     parser.add_argument("--model", type=Path, default=Path("models/model_depth47.p"))
     parser.add_argument("--report-output", type=Path, default=Path("reports/eval_metrics.json"))
+    parser.add_argument("--warning", default=None)
     return parser
 
 
-def main() -> None:
-    args = build_parser().parse_args()
-    with args.dataset.open("rb") as file:
+def evaluate(dataset_path: Path, model_path: Path, report_path: Path, warning: str | None = None) -> dict:
+    with dataset_path.open("rb") as file:
         dataset = pickle.load(file)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", InconsistentVersionWarning)
-        with args.model.open("rb") as file:
+        with model_path.open("rb") as file:
             model_obj = pickle.load(file)
 
     data = np.asarray(dataset["data"])
@@ -44,17 +46,24 @@ def main() -> None:
         "macro_f1": float(f1_score(labels, predictions, average="macro")),
         "num_classes": int(len(set(labels))),
         "num_samples": int(len(labels)),
+        "warning": warning,
         "classification_report": classification_report(labels, predictions, output_dict=True, zero_division=0),
         "confusion_matrix": confusion_matrix(labels, predictions).tolist(),
     }
 
-    args.report_output.parent.mkdir(parents=True, exist_ok=True)
-    with args.report_output.open("w", encoding="utf-8") as file:
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    with report_path.open("w", encoding="utf-8") as file:
         json.dump(metrics, file, indent=2)
 
     print(classification_report(labels, predictions, zero_division=0))
     print(confusion_matrix(labels, predictions))
-    print(f"Saved metrics to {args.report_output}")
+    print(f"Saved metrics to {report_path}")
+    return metrics
+
+
+def main() -> None:
+    args = build_parser().parse_args()
+    evaluate(args.dataset, args.model, args.report_output, args.warning)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,11 @@ dependencies = [
     "pynput~=1.7",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest~=8.2",
+]
+
 [project.scripts]
 tlse-capture = "tlse.capture:main"
 tlse-preprocess = "tlse.preprocess:main"

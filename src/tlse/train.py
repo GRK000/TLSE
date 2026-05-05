@@ -1,22 +1,80 @@
+from __future__ import annotations
+
 import argparse
+import hashlib
+import importlib.metadata
 import json
 import pickle
+import platform
 from pathlib import Path
+from datetime import datetime, timezone
 
 import numpy as np
+import sklearn
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
-from sklearn.model_selection import RandomizedSearchCV, train_test_split
+from sklearn.model_selection import GroupShuffleSplit, RandomizedSearchCV, train_test_split
 
 
-def load_dataset(path: Path) -> tuple[np.ndarray, np.ndarray, list[str]]:
+FEATURE_VERSION = "depth47-v1"
+
+
+def package_version(package_name: str) -> str | None:
+    try:
+        return importlib.metadata.version(package_name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_dataset(path: Path) -> tuple[np.ndarray, np.ndarray, list[str], np.ndarray | None]:
     with path.open("rb") as file:
         dataset = pickle.load(file)
 
     data = np.asarray(dataset["data"])
     labels = np.asarray(dataset["labels"])
     class_names = list(dataset.get("class_names", sorted(set(labels))))
-    return data, labels, class_names
+    groups = dataset.get("groups", dataset.get("group_ids"))
+    return data, labels, class_names, None if groups is None else np.asarray(groups)
+
+
+def split_dataset(
+    data: np.ndarray,
+    labels: np.ndarray,
+    groups: np.ndarray | None,
+    random_state: int,
+    test_size: float,
+    split_strategy: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict]:
+    if split_strategy == "group":
+        if groups is None:
+            raise ValueError("Group split requested, but the dataset has no 'groups' or 'group_ids' field.")
+        splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
+        train_idx, test_idx = next(splitter.split(data, labels, groups=groups))
+        metadata = {
+            "split_strategy": "GroupShuffleSplit",
+            "num_groups": int(len(set(groups))),
+            "train_groups": int(len(set(groups[train_idx]))),
+            "test_groups": int(len(set(groups[test_idx]))),
+        }
+        return data[train_idx], data[test_idx], labels[train_idx], labels[test_idx], metadata
+
+    x_train, x_test, y_train, y_test = train_test_split(
+        data,
+        labels,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=labels,
+    )
+    return x_train, x_test, y_train, y_test, {"split_strategy": "stratified train_test_split"}
 
 
 def train_model(
@@ -26,13 +84,14 @@ def train_model(
     n_iter: int,
     cv: int,
     n_jobs: int,
-) -> tuple[RandomForestClassifier, dict]:
-    x_train, x_test, y_train, y_test = train_test_split(
-        data,
-        labels,
-        test_size=0.20,
-        random_state=random_state,
-        stratify=labels,
+    groups: np.ndarray | None,
+    split_strategy: str,
+    test_size: float,
+    calibrate_probabilities: bool = False,
+    calibration_method: str = "sigmoid",
+) -> tuple[object, dict]:
+    x_train, x_test, y_train, y_test, split_metadata = split_dataset(
+        data, labels, groups, random_state, test_size, split_strategy
     )
 
     param_grid = {
@@ -53,6 +112,9 @@ def train_model(
     )
     search.fit(x_train, y_train)
     model = search.best_estimator_
+    if calibrate_probabilities:
+        model = CalibratedClassifierCV(model, method=calibration_method, cv=cv)
+        model.fit(x_train, y_train)
     y_pred = model.predict(x_test)
 
     metrics = {
@@ -63,19 +125,42 @@ def train_model(
         "train_samples": int(len(y_train)),
         "test_samples": int(len(y_test)),
         "best_params": search.best_params_,
+        "calibrated_probabilities": calibrate_probabilities,
+        "calibration_method": calibration_method if calibrate_probabilities else None,
         "classification_report": classification_report(y_test, y_pred, output_dict=True, zero_division=0),
         "confusion_matrix": confusion_matrix(y_test, y_pred).tolist(),
+        **split_metadata,
     }
     print(classification_report(y_test, y_pred, zero_division=0))
     print(confusion_matrix(y_test, y_pred))
     return model, metrics
 
 
-def save_outputs(model_path: Path, report_path: Path, model: RandomForestClassifier, class_names: list[str], metrics: dict) -> None:
+def build_model_metadata(dataset_path: Path, report_path: Path) -> dict:
+    return {
+        "feature_version": FEATURE_VERSION,
+        "python_version": platform.python_version(),
+        "sklearn_version": sklearn.__version__,
+        "mediapipe_version": package_version("mediapipe"),
+        "numpy_version": np.__version__,
+        "dataset_hash": file_sha256(dataset_path),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "metrics_path": str(report_path),
+    }
+
+
+def save_outputs(
+    model_path: Path,
+    report_path: Path,
+    model: object,
+    class_names: list[str],
+    metrics: dict,
+    metadata: dict,
+) -> None:
     model_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     with model_path.open("wb") as file:
-        pickle.dump({"model": model, "class_names": class_names}, file)
+        pickle.dump({"model": model, "class_names": class_names, "metadata": metadata}, file)
     with report_path.open("w", encoding="utf-8") as file:
         json.dump(metrics, file, indent=2)
 
@@ -89,14 +174,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-iter", type=int, default=20)
     parser.add_argument("--cv", type=int, default=3)
     parser.add_argument("--n-jobs", type=int, default=-1)
+    parser.add_argument("--split-strategy", choices=["random", "group"], default="random")
+    parser.add_argument("--test-size", type=float, default=0.20)
+    parser.add_argument("--calibrate-probabilities", action="store_true")
+    parser.add_argument("--calibration-method", choices=["sigmoid", "isotonic"], default="sigmoid")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
-    data, labels, class_names = load_dataset(args.dataset)
-    model, metrics = train_model(data, labels, args.random_state, args.n_iter, args.cv, args.n_jobs)
-    save_outputs(args.model_output, args.report_output, model, class_names, metrics)
+    data, labels, class_names, groups = load_dataset(args.dataset)
+    model, metrics = train_model(
+        data,
+        labels,
+        args.random_state,
+        args.n_iter,
+        args.cv,
+        args.n_jobs,
+        groups,
+        args.split_strategy,
+        args.test_size,
+        args.calibrate_probabilities,
+        args.calibration_method,
+    )
+    metadata = build_model_metadata(args.dataset, args.report_output)
+    save_outputs(args.model_output, args.report_output, model, class_names, metrics, metadata)
     print(f"Saved model to {args.model_output}")
     print(f"Saved metrics to {args.report_output}")
 

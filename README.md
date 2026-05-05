@@ -39,7 +39,7 @@ The demo dataset is synthetic 47-feature landmark data. It proves the package, C
 
 ```bash
 python scripts/make_demo_dataset.py --output demo/sample_data/landmarks_demo.pickle
-python -m tlse.train --dataset demo/sample_data/landmarks_demo.pickle --model-output models/demo_model.p --report-output reports/demo_metrics.json --n-iter 2 --cv 2 --n-jobs 1
+python -m tlse.train --dataset demo/sample_data/landmarks_demo.pickle --model-output models/demo_model.p --report-output reports/demo_metrics.json --n-iter 2 --cv 2 --n-jobs 1 --split-strategy group
 ```
 
 Expected smoke-test result on the generated demo dataset:
@@ -65,7 +65,13 @@ If you already have the legacy local dataset in `Data2/`, preprocess it into the
 
 ```bash
 python -m tlse.preprocess --data-dir Data2 --output data/processed/data2_landmarks.pickle
-python scripts/evaluate_model.py --dataset data/processed/data2_landmarks.pickle --model Pickles/model_depth47.p --report-output reports/data2_eval_metrics.json
+python scripts/evaluate_real.py
+```
+
+For webcam captures, prefer grouped splits by session, person, or capture batch. Consecutive frames are often near-duplicates; a random `train_test_split` can leak almost identical frames into both train and test. Store `groups` or `group_ids` in the processed dataset and train with:
+
+```bash
+python -m tlse.train --dataset data/processed/landmarks.pickle --split-strategy group
 ```
 
 ## Metrics
@@ -78,6 +84,8 @@ python scripts/evaluate_model.py --dataset data/processed/data2_landmarks.pickle
 - best Random Forest hyperparameters
 - full `classification_report`
 - confusion matrix
+- split strategy metadata
+- model artifact metadata
 
 Current local benchmark from the legacy processed dataset:
 
@@ -88,6 +96,75 @@ Current local benchmark from the legacy processed dataset:
 Main observed confusion: the `None` class has lower recall than the signed classes. In the local run, 12 of 100 `None` samples were predicted as another class, especially `K`, `E`, `L`, `C`, `P`, and `U`. Treat this as a legacy in-sample evaluation because the committed pickle does not include the original train/test split metadata.
 
 The newer `Data2/` + `Pickles/model_depth47.p` 47-feature model needs OpenCV and MediaPipe to regenerate comparable processed features. Generate `reports/data2_eval_metrics.json` with the command above before publishing a stronger portfolio claim.
+
+Use separate evaluation commands depending on what is being measured:
+
+```bash
+python scripts/evaluate_demo.py
+python scripts/evaluate_legacy.py
+python scripts/evaluate_real.py
+```
+
+`evaluate-demo` is a smoke test. `evaluate-legacy` is an in-sample compatibility check. `evaluate-real` should be used with held-out or group-split real captures. Testing on data already seen during training can report high scores while failing on new users, sessions, or lighting conditions.
+
+To compare model families:
+
+```bash
+python scripts/benchmark_models.py --dataset data/processed/landmarks.pickle --split-strategy group
+```
+
+The benchmark includes `DummyClassifier`, `RandomForestClassifier`, `SVC`, `KNeighborsClassifier`, and `MLPClassifier`, reporting accuracy, macro F1, fit time, and prediction time.
+
+## Model Artifacts
+
+Saved model files keep compatibility with `.p` and `.pickle`, but they now include metadata:
+
+```python
+{
+    "model": model,
+    "class_names": class_names,
+    "metadata": {
+        "feature_version": "depth47-v1",
+        "python_version": "...",
+        "sklearn_version": "...",
+        "mediapipe_version": "...",
+        "numpy_version": "...",
+        "dataset_hash": "...",
+        "created_at": "...",
+        "metrics_path": "reports/metrics.json"
+    }
+}
+```
+
+Only load pickle artifacts from trusted sources. Python pickle, joblib, and cloudpickle can execute arbitrary code during loading, and scikit-learn does not guarantee reliable loading across different library versions. For a more security-conscious format, evaluate `skops.io`.
+
+## CI And Tests
+
+GitHub Actions runs on every push and pull request via `.github/workflows/ci.yml`:
+
+```bash
+python -m compileall src scripts
+pytest -q
+python scripts/make_demo_dataset.py
+python -m tlse.train --dataset demo/sample_data/landmarks_demo.pickle --n-iter 2 --cv 2 --n-jobs 1 --split-strategy group
+python scripts/evaluate_demo.py
+```
+
+The pytest suite avoids webcam, OpenCV, and MediaPipe execution. It tests demo dataset loading, grouped training, model serialization, metadata, and metrics writing.
+
+## Real-Time Inference
+
+`tlse.realtime` applies a confidence threshold and temporal smoothing:
+
+```bash
+python -m tlse.realtime --model models/model_depth47.p --confidence-threshold 0.75 --smoothing-window 8
+```
+
+The confidence value comes from `predict_proba`, which is not guaranteed to be calibrated for Random Forests. For experiments that depend on probability quality, train with:
+
+```bash
+python -m tlse.train --dataset data/processed/landmarks.pickle --calibrate-probabilities --calibration-method sigmoid
+```
 
 ## Demo Visuals
 
@@ -111,6 +188,7 @@ Recommended final embed:
 - MediaPipe can fail with occlusion, motion blur, partial hands, or unusual hand orientations.
 - The `None` class is a practical UI state, not a linguistic sign.
 - Dynamic signs need temporal modeling and video sequences; the current Random Forest uses single-frame features.
+- Future feature variants should test MediaPipe handedness and 3D world landmarks, not only the current normalized 47-feature vector.
 
 ## Legacy Map
 
