@@ -46,6 +46,8 @@ def build_landmark_dataset(data_dir: Path, min_detection_confidence: float) -> t
 def save_dataset(output_path: Path, data: np.ndarray, labels: np.ndarray, class_names: list[str]) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("wb") as file:
+        # Pickle is used for local interoperability with existing TLSE scripts.
+        # Only load generated datasets from trusted locations.
         pickle.dump({"data": data, "labels": labels, "class_names": class_names}, file)
 
 

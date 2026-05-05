@@ -1,202 +1,240 @@
-# TLSE - Static Sign/Gesture Alphabet Recognizer
+# TLSE
 
-TLSE is a computer-vision experiment for recognizing static hand signs and gesture-like alphabet poses from webcam frames. It is not a full Spanish Sign Language translator: it does not model grammar, sentence context, signer variation, or dynamic movement. The current scope is closer to a real-time sign/gesture alphabet recognizer with MediaPipe hand landmarks and a Random Forest classifier.
+TLSE is a small Python/ML project for recognizing isolated static hand signs or
+gesture-like alphabet poses from webcam frames. It uses MediaPipe hand landmarks
+as features and a scikit-learn Random Forest as the maintained baseline model.
 
-## What Is In The Repo
+It is not a full Spanish Sign Language translator. It does not model grammar,
+sentence context, signer variation, or dynamic signs over time.
 
-The maintained code lives in `src/tlse`:
+## Project Status
 
-| Path | Purpose |
-| --- | --- |
-| `src/tlse/capture.py` | Capture labeled webcam images into `data/raw/<class>/`. |
-| `src/tlse/preprocess.py` | Convert images into normalized 47-feature MediaPipe landmark vectors. |
-| `src/tlse/train.py` | Train a Random Forest and write model + metrics artifacts. |
-| `src/tlse/realtime.py` | Run webcam inference with landmark overlay, prediction, and confidence. |
-| `src/tlse/demo.py` | Create a deterministic synthetic dataset for smoke tests without webcam access. |
+This repository is a maintainable MVP/demo. The package layout, CLI, tests, and
+CI are intended to support reproducible local experiments without requiring a
+webcam in automated checks. Real model quality still needs a reproducible
+held-out or grouped benchmark on real captures.
 
-Historical scripts are still present in folders such as `Versiones 1/`, `Versiones 2/`, `Entrenar Modelo/`, `Procesamiento del Dataset/`, and `Recopilar Fotos/`. They are useful for portfolio history, but new work should target the package layout above.
+## Requirements
 
-## Environment
+- Python 3.9, 3.10, or 3.11
+- A webcam only for capture or real-time inference
+- OpenCV and MediaPipe for image preprocessing and webcam workflows
 
-Python 3.9-3.11 is recommended because MediaPipe wheels may lag behind the newest Python releases.
+Python 3.12 is intentionally not declared as supported because MediaPipe wheels
+can lag behind the newest Python releases.
+
+## Installation
+
+Recommended development setup:
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
-pip install -r requirements.txt
-pip install -e .
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-Dependencies are also declared in `pyproject.toml`, so the environment is freezeable with:
+`pyproject.toml` is the canonical packaging and dependency source. The
+`requirements.txt` file is kept only as a convenience for simple local/demo
+installs:
 
 ```bash
-pip freeze > requirements.lock.txt
+python -m pip install -r requirements.txt
+python -m pip install -e .
 ```
 
-## Reproducible Demo Without Webcam
+## Quickstart
 
-The demo dataset is synthetic 47-feature landmark data. It proves the package, CLI, training, model serialization, and metrics path work in a clean environment. It is not a sign-language benchmark.
+Run the synthetic demo workflow in about a minute:
 
 ```bash
-python scripts/make_demo_dataset.py --output demo/sample_data/landmarks_demo.pickle
-python -m tlse.train --dataset demo/sample_data/landmarks_demo.pickle --model-output models/demo_model.p --report-output reports/demo_metrics.json --n-iter 2 --cv 2 --n-jobs 1 --split-strategy group
+python -m pip install -e ".[dev]"
+python -m tlse demo
+python -m tlse evaluate --dataset demo/sample_data/landmarks_demo.pickle --model models/demo_model.p --report-output reports/demo_eval_metrics.json
+pytest
 ```
 
-Expected smoke-test result on the generated demo dataset:
+The demo dataset is synthetic and deliberately separable. A perfect demo score
+only proves the package, CLI, training, serialization, and metrics paths work; it
+is not a sign-language benchmark.
 
-| Dataset | Classes | Samples | Accuracy | Macro F1 |
-| --- | ---: | ---: | ---: | ---: |
-| `demo/sample_data/landmarks_demo.pickle` | 4 | 160 | 1.00 | 1.00 |
-
-The perfect score is expected because the synthetic classes are deliberately separable. Use the real image workflow below for meaningful model quality.
-
-## Real Dataset Workflow
-
-Use a consistent path convention for new runs:
+## CLI Examples
 
 ```bash
-python -m tlse.capture --output-dir data/raw --num-classes 20 --images-per-class 100
-python -m tlse.preprocess --data-dir data/raw --output data/processed/landmarks.pickle
-python -m tlse.train --dataset data/processed/landmarks.pickle --model-output models/model_depth47.p --report-output reports/metrics.json
-python -m tlse.realtime --model models/model_depth47.p
+python -m tlse --help
+python -m tlse demo --help
+python -m tlse evaluate --help
+python -m tlse benchmark --help
 ```
 
-If you already have the legacy local dataset in `Data2/`, preprocess it into the new convention:
+Generate and train on the synthetic demo dataset:
 
 ```bash
-python -m tlse.preprocess --data-dir Data2 --output data/processed/data2_landmarks.pickle
-python scripts/evaluate_real.py
+python -m tlse demo --dataset demo/sample_data/landmarks_demo.pickle --model-output models/demo_model.p
 ```
 
-For webcam captures, prefer grouped splits by session, person, or capture batch. Consecutive frames are often near-duplicates; a random `train_test_split` can leak almost identical frames into both train and test. Store `groups` or `group_ids` in the processed dataset and train with:
+Evaluate a trained model on a processed landmark dataset:
+
+```bash
+python -m tlse evaluate --dataset data/processed/landmarks.pickle --model models/model_depth47.p --report-output reports/eval_metrics.json
+```
+
+Compare baseline classifiers:
+
+```bash
+python -m tlse benchmark --dataset data/processed/landmarks.pickle --split-strategy group --report-output reports/model_benchmark.json
+```
+
+The CLI raises clear file errors when the requested dataset or model artifact is
+missing.
+
+Legacy-compatible entry points still exist:
+
+```bash
+tlse-capture
+tlse-preprocess
+tlse-train
+tlse-realtime
+tlse-evaluate
+tlse-benchmark
+```
+
+## Repository Structure
+
+| Path | Purpose |
+| --- | --- |
+| `src/tlse/` | Maintained importable package. |
+| `src/tlse/cli.py` | Unified argparse CLI used by `python -m tlse`. |
+| `src/tlse/demo.py` | Synthetic dataset generator for smoke tests. |
+| `src/tlse/train.py` | Dataset loading, splitting, Random Forest training, metrics, artifacts. |
+| `src/tlse/evaluate.py` | Model evaluation helpers. |
+| `src/tlse/benchmark.py` | Baseline classifier benchmark. |
+| `scripts/` | Compatibility wrappers for older workflows. |
+| `tests/` | Fast package, CLI, dataset, and demo training tests. |
+| `demo/sample_data/` | Committed synthetic demo fixture. |
+| `Versiones 1/`, `Versiones 2/`, `Entrenar Modelo/`, `Procesamiento del Dataset/`, `Recopilar Fotos/` | Historical experiment scripts. |
+
+New work should target `src/tlse/`. The historical folders are kept for project
+history and should not be treated as the maintained API.
+
+## Data Format
+
+Processed datasets are Python pickle files containing a dictionary:
+
+```python
+{
+    "data": numpy.ndarray,        # shape: (num_samples, 47)
+    "labels": numpy.ndarray,      # shape: (num_samples,)
+    "class_names": list[str],     # optional but recommended
+    "groups": numpy.ndarray,      # optional session/person/batch ids
+}
+```
+
+The maintained feature vector is `depth47-v1`: normalized 2D MediaPipe hand
+landmarks plus five fingertip depth features.
+
+For webcam captures, prefer grouped splits by session, person, or capture batch:
 
 ```bash
 python -m tlse.train --dataset data/processed/landmarks.pickle --split-strategy group
 ```
 
-## Metrics
+Random splits can leak near-duplicate consecutive frames between train and test.
 
-`tlse.train` writes `reports/metrics.json` with:
+## Pickle Security
 
-- accuracy and macro F1
-- class count and sample count
-- train/test split sizes
-- best Random Forest hyperparameters
-- full `classification_report`
-- confusion matrix
-- split strategy metadata
-- model artifact metadata
+TLSE currently uses `.pickle`/`.p` artifacts for compatibility with the existing
+dataset and model workflows. Only load pickle files you created locally or
+received from a trusted source. Python pickle can execute arbitrary code during
+loading.
 
-Current local benchmark from the legacy processed dataset:
+A future dataset format should move to a safer interchange format such as
+`.npz`, `.csv`, `.json`, or Parquet. That migration is intentionally not done
+here to avoid breaking the current ML workflow.
 
-| Dataset/model | Features | Classes | Samples | Accuracy | Macro F1 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `Pickles/data.pickle` + `Pickles/model.p` | 42 | 20 | 2000 | 0.993 | 0.993 |
+## Tests And CI
 
-Main observed confusion: the `None` class has lower recall than the signed classes. In the local run, 12 of 100 `None` samples were predicted as another class, especially `K`, `E`, `L`, `C`, `P`, and `U`. Treat this as a legacy in-sample evaluation because the committed pickle does not include the original train/test split metadata.
-
-The newer `Data2/` + `Pickles/model_depth47.p` 47-feature model needs OpenCV and MediaPipe to regenerate comparable processed features. Generate `reports/data2_eval_metrics.json` with the command above before publishing a stronger portfolio claim.
-
-Use separate evaluation commands depending on what is being measured:
+Run the local test suite:
 
 ```bash
-python scripts/evaluate_demo.py
-python scripts/evaluate_legacy.py
-python scripts/evaluate_real.py
+pytest
 ```
 
-`evaluate-demo` is a smoke test. `evaluate-legacy` is an in-sample compatibility check. `evaluate-real` should be used with held-out or group-split real captures. Testing on data already seen during training can report high scores while failing on new users, sessions, or lighting conditions.
+CI installs the package in editable mode, checks CLI help, compiles Python files,
+and runs tests on Python 3.10 and 3.11. It avoids webcam, GPU, credentials, and
+local-only datasets.
 
-To compare model families:
+## Evaluation And Benchmarking
+
+Demo smoke test:
 
 ```bash
-python scripts/benchmark_models.py --dataset data/processed/landmarks.pickle --split-strategy group
+python -m tlse demo
 ```
 
-The benchmark includes `DummyClassifier`, `RandomForestClassifier`, `SVC`, `KNeighborsClassifier`, and `MLPClassifier`, reporting accuracy, macro F1, fit time, and prediction time.
-
-## Model Artifacts
-
-Saved model files keep compatibility with `.p` and `.pickle`, but they now include metadata:
-
-```python
-{
-    "model": model,
-    "class_names": class_names,
-    "metadata": {
-        "feature_version": "depth47-v1",
-        "python_version": "...",
-        "sklearn_version": "...",
-        "mediapipe_version": "...",
-        "numpy_version": "...",
-        "dataset_hash": "...",
-        "created_at": "...",
-        "metrics_path": "reports/metrics.json"
-    }
-}
-```
-
-Only load pickle artifacts from trusted sources. Python pickle, joblib, and cloudpickle can execute arbitrary code during loading, and scikit-learn does not guarantee reliable loading across different library versions. For a more security-conscious format, evaluate `skops.io`.
-
-## CI And Tests
-
-GitHub Actions runs on every push and pull request via `.github/workflows/ci.yml`:
+Real processed dataset evaluation:
 
 ```bash
-python -m compileall src scripts
-pytest -q
-python scripts/make_demo_dataset.py
-python -m tlse.train --dataset demo/sample_data/landmarks_demo.pickle --n-iter 2 --cv 2 --n-jobs 1 --split-strategy group
-python scripts/evaluate_demo.py
+python -m tlse evaluate --dataset data/processed/landmarks.pickle --model models/model_depth47.p
 ```
 
-The pytest suite avoids webcam, OpenCV, and MediaPipe execution. It tests demo dataset loading, grouped training, model serialization, metadata, and metrics writing.
+Classifier benchmark:
 
-## Real-Time Inference
+```bash
+python -m tlse benchmark --dataset data/processed/landmarks.pickle --split-strategy group
+```
 
-`tlse.realtime` applies a confidence threshold and temporal smoothing:
+Current reproducible demo result:
+
+| Dataset | Classes | Samples | Accuracy | Macro F1 | Notes |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `demo/sample_data/landmarks_demo.pickle` | 4 | 160 | 1.00 | 1.00 | Synthetic smoke test only |
+
+Real-world benchmark status:
+
+| Dataset/model | Result |
+| --- | --- |
+| Held-out/grouped real captures | Pending reproducible benchmark |
+
+## Real Dataset Workflow
+
+Capture images:
+
+```bash
+python -m tlse.capture --output-dir data/raw --num-classes 20 --images-per-class 100
+```
+
+Preprocess images into landmark features:
+
+```bash
+python -m tlse.preprocess --data-dir data/raw --output data/processed/landmarks.pickle
+```
+
+Train:
+
+```bash
+python -m tlse.train --dataset data/processed/landmarks.pickle --model-output models/model_depth47.p --report-output reports/metrics.json
+```
+
+Run webcam inference:
 
 ```bash
 python -m tlse.realtime --model models/model_depth47.p --confidence-threshold 0.75 --smoothing-window 8
 ```
 
-The confidence value comes from `predict_proba`, which is not guaranteed to be calibrated for Random Forests. For experiments that depend on probability quality, train with:
+## Known Limitations
 
-```bash
-python -m tlse.train --dataset data/processed/landmarks.pickle --calibrate-probabilities --calibration-method sigmoid
-```
-
-## Demo Visuals
-
-For the portfolio README, add a real capture or GIF under `docs/media/` showing:
-
-- webcam frame
-- MediaPipe hand landmarks
-- predicted class
-- confidence score
-
-Recommended final embed:
-
-```markdown
-![TLSE webcam demo](docs/media/tlse-demo.gif)
-```
-
-## Limitations
-
-- Recognizes isolated static poses; it does not translate full Spanish Sign Language.
-- Accuracy depends heavily on the signer, camera, lighting, distance, and class balance.
+- Recognizes isolated static poses, not full Spanish Sign Language.
+- Accuracy depends on signer, camera, lighting, distance, framing, and class balance.
 - MediaPipe can fail with occlusion, motion blur, partial hands, or unusual hand orientations.
 - The `None` class is a practical UI state, not a linguistic sign.
-- Dynamic signs need temporal modeling and video sequences; the current Random Forest uses single-frame features.
-- Future feature variants should test MediaPipe handedness and 3D world landmarks, not only the current normalized 47-feature vector.
+- Dynamic signs need temporal modeling over video sequences.
+- Random Forest probabilities from `predict_proba` are not guaranteed to be calibrated.
 
-## Legacy Map
+## Next Steps
 
-| Legacy path | New target |
-| --- | --- |
-| `Recopilar Fotos/2DataSet.py` | `src/tlse/capture.py` |
-| `Procesamiento del Dataset/CrearDataSet.py` | `src/tlse/preprocess.py` |
-| `Entrenar Modelo/EntrenamientoModelo5.py` | `src/tlse/train.py` |
-| `Versiones 1/V1.4/PM_V1.4.9.py` | `src/tlse/realtime.py` |
-| `Data2/` | `data/raw/` |
-| `Pickles/model_depth47.p` | `models/model_depth47.p` |
+- Publish a reproducible grouped benchmark on real captures.
+- Add session/person/batch group metadata during preprocessing.
+- Consider a safer processed dataset format such as `.npz` or Parquet.
+- Add a short real webcam GIF or image under `docs/media/` for portfolio use.
+- Evaluate whether dynamic signs need sequence models rather than single-frame features.

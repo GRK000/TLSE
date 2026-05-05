@@ -1,4 +1,4 @@
-from tlse.demo import main
+from tlse.cli import main
 
 
 if __name__ == "__main__":

@@ -24,11 +24,15 @@ dev = [
 ]
 
 [project.scripts]
+tlse = "tlse.cli:main"
 tlse-capture = "tlse.capture:main"
 tlse-preprocess = "tlse.preprocess:main"
 tlse-train = "tlse.train:main"
 tlse-realtime = "tlse.realtime:main"
 tlse-make-demo-dataset = "tlse.demo:main"
+tlse-evaluate = "tlse.evaluate:main"
+tlse-benchmark = "tlse.benchmark:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["tlse*"]

@@ -1,9 +1,6 @@
 from pathlib import Path
 
-try:
-    from scripts.evaluate_model import evaluate
-except ModuleNotFoundError:
-    from evaluate_model import evaluate
+from tlse.evaluate import evaluate
 
 
 def main() -> None:
