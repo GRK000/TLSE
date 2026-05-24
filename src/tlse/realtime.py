@@ -1,5 +1,4 @@
 import argparse
-import pickle
 from collections import Counter, deque
 from pathlib import Path
 from typing import Tuple
@@ -21,9 +20,9 @@ class PredictionSmoother:
 class RealTimeSignRecognizer:
     def __init__(self, model_path: Path, camera_index: int, confidence_threshold: float, smoothing_window: int) -> None:
         import mediapipe as mp
+        from tlse.evaluate import load_model_artifact
 
-        with model_path.open("rb") as file:
-            obj = pickle.load(file)
+        obj = load_model_artifact(model_path)
 
         self.model = obj["model"]
         self.classes = obj["class_names"]

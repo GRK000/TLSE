@@ -22,6 +22,8 @@ def make_demo_dataset(output_path: Path, samples_per_class: int, random_state: i
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("wb") as file:
+        # Demo data is a local pickle fixture. Only load pickle files from trusted
+        # sources because unpickling can execute arbitrary code.
         pickle.dump(
             {
                 "data": np.asarray(data, dtype=np.float32),
